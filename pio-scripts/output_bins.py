@@ -2,6 +2,7 @@ Import('env')
 import os
 import shutil
 import gzip
+import datetime
 
 OUTPUT_DIR = "build_output{}".format(os.path.sep)
 
@@ -28,7 +29,7 @@ def bin_rename_copy(source, target, env):
 
     # create string with location and file names based on variant
     map_file = "{}map{}{}.map".format(OUTPUT_DIR, os.path.sep, variant)
-    bin_file = "{}firmware{}{}.bin".format(OUTPUT_DIR, os.path.sep, variant)
+    bin_file = "{}firmware{}{}_{}.bin".format(OUTPUT_DIR, os.path.sep, variant, datetime.date.today().strftime("%Y-%m-%d"))
 
     release_name = _get_cpp_define_value(env, "WLED_RELEASE_NAME")
 
