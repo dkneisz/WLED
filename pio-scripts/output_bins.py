@@ -56,8 +56,8 @@ def bin_gzip(source, target, env):
     variant = env["PIOENV"]
 
     # create string with location and file names based on variant
-    bin_file = "{}firmware{}{}.bin".format(OUTPUT_DIR, os.path.sep, variant)
-    gzip_file = "{}firmware{}{}.bin.gz".format(OUTPUT_DIR, os.path.sep, variant)
+    bin_file = "{}firmware{}{}_{}.bin".format(OUTPUT_DIR, os.path.sep, variant, datetime.date.today().strftime("%Y-%m-%d"))
+    gzip_file = "{}firmware{}{}_{}.bin.gz".format(OUTPUT_DIR, os.path.sep, variant, datetime.date.today().strftime("%Y-%m-%d"))
 
     # check if new target files exist and remove if necessary
     if os.path.isfile(gzip_file): os.remove(gzip_file)
