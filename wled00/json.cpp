@@ -8,6 +8,7 @@
 
 bool getVal(JsonVariant elem, byte* val, byte vmin=0, byte vmax=255) {
   if (elem.is<int>()) {
+		if (elem < 0) return false; //ignore e.g. {"ps":-1}
     *val = elem;
     return true;
   } else if (elem.is<const char*>()) {
@@ -63,7 +64,7 @@ void deserializeSegment(JsonObject elem, byte it, byte presetId)
 
   uint16_t grp = elem["grp"] | seg.grouping;
   uint16_t spc = elem[F("spc")] | seg.spacing;
-  strip.setSegment(id, start, stop, grp, spc);
+	uint16_t of = seg.offset;
 
   uint16_t len = 1;
   if (stop > start) len = stop - start;
@@ -72,9 +73,10 @@ void deserializeSegment(JsonObject elem, byte it, byte presetId)
     int offsetAbs = abs(offset);
     if (offsetAbs > len - 1) offsetAbs %= len;
     if (offset < 0) offsetAbs = len - offsetAbs;
-    seg.offset = offsetAbs;
+    of = offsetAbs;
   }
-  if (stop > start && seg.offset > len -1) seg.offset = len -1;
+  if (stop > start && of > len -1) of = len -1;
+	strip.setSegment(id, start, stop, grp, spc, of);
 
   byte segbri = 0;
   if (getVal(elem["bri"], &segbri)) {
@@ -86,6 +88,10 @@ void deserializeSegment(JsonObject elem, byte it, byte presetId)
   if (elem["on"].is<const char*>() && elem["on"].as<const char*>()[0] == 't') on = !on;
   seg.setOption(SEG_OPTION_ON, on, id);
   
+	uint8_t cctPrev = seg.cct;
+  seg.setCCT(elem["cct"] | seg.cct, id);
+	if (seg.cct != cctPrev && id == strip.getMainSegmentId()) effectChanged = true; //send UDP
+
   JsonArray colarr = elem["col"];
   if (!colarr.isNull())
   {
@@ -143,26 +149,28 @@ void deserializeSegment(JsonObject elem, byte it, byte presetId)
 
   //if (pal != seg.palette && pal < strip.getPaletteCount()) strip.setPalette(pal);
   seg.setOption(SEG_OPTION_SELECTED, elem[F("sel")] | seg.getOption(SEG_OPTION_SELECTED));
-  seg.setOption(SEG_OPTION_REVERSED, elem["rev"] | seg.getOption(SEG_OPTION_REVERSED));
+  seg.setOption(SEG_OPTION_REVERSED, elem["rev"]    | seg.getOption(SEG_OPTION_REVERSED));
   seg.setOption(SEG_OPTION_MIRROR  , elem[F("mi")]  | seg.getOption(SEG_OPTION_MIRROR  ));
 
   //temporary, strip object gets updated via colorUpdated()
   if (id == strip.getMainSegmentId()) {
-    byte effectPrev = effectCurrent;
-    effectCurrent = elem["fx"] | effectCurrent;
-    if (!presetId && effectCurrent != effectPrev) unloadPlaylist(); //stop playlist if active and FX changed manually
+		byte effectPrev = effectCurrent;
+    if (getVal(elem["fx"], &effectCurrent, 1, strip.getModeCount())) { //load effect ('r' random, '~' inc/dec, 0-255 exact value)
+      if (!presetId && effectCurrent != effectPrev) unloadPlaylist(); //stop playlist if active and FX changed manually
+    }
     effectSpeed = elem[F("sx")] | effectSpeed;
     effectIntensity = elem[F("ix")] | effectIntensity;
-    effectPalette = elem["pal"] | effectPalette;
+    getVal(elem["pal"], &effectPalette, 1, strip.getPaletteCount());
   } else { //permanent
-    byte fx = elem["fx"] | seg.mode;
-    if (fx != seg.mode && fx < strip.getModeCount()) {
+    byte fx = seg.mode;
+		byte fxPrev = fx;
+    if (getVal(elem["fx"], &fx, 1, strip.getModeCount())) { //load effect ('r' random, '~' inc/dec, 0-255 exact value)
       strip.setMode(id, fx);
-      if (!presetId) unloadPlaylist(); //stop playlist if active and FX changed manually
+      if (!presetId && seg.mode != fxPrev) unloadPlaylist(); //stop playlist if active and FX changed manually
     }
     seg.speed = elem[F("sx")] | seg.speed;
     seg.intensity = elem[F("ix")] | seg.intensity;
-    seg.palette = elem["pal"] | seg.palette;
+    getVal(elem["pal"], &seg.palette, 1, strip.getPaletteCount());
   }
 
   JsonArray iarr = elem[F("i")]; //set individual LEDs
@@ -339,9 +347,11 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
       deletePreset(ps);
     }
 
-    if (getVal(root["ps"], &presetCycCurr, 1, 5)) { //load preset (clears state request!)
+    ps = presetCycCurr;
+    if (getVal(root["ps"], &ps, presetCycMin, presetCycMax)) { //load preset (clears state request!)
       if (!presetId) unloadPlaylist(); //stop playlist if preset changed manually
-      applyPreset(presetCycCurr, callMode);
+      if (ps >= presetCycMin && ps <= presetCycMax) presetCycCurr = ps;
+      applyPreset(ps, callMode);
       return stateResponse;
     }
 
@@ -381,6 +391,7 @@ void serializeSegment(JsonObject& root, WS2812FX::Segment& seg, byte id, bool fo
   root["on"] = seg.getOption(SEG_OPTION_ON);
   byte segbri = seg.opacity;
   root["bri"] = (segbri) ? segbri : 255;
+  root["cct"] = seg.cct;
 
   if (segmentBounds && seg.name != nullptr) root["n"] = reinterpret_cast<const char *>(seg.name); //not good practice, but decreases required JSON buffer
 
@@ -427,7 +438,7 @@ void serializeState(JsonObject root, bool forPreset, bool includeBri, bool segme
   if (!forPreset) {
     if (errorFlag) root[F("error")] = errorFlag;
 
-    root[F("ps")] = (currentPreset > 0) ? currentPreset : -1;
+    root["ps"] = (currentPreset > 0) ? currentPreset : -1;
     root[F("pl")] = currentPlaylist;
 
     usermods.addToJsonState(root);
@@ -496,7 +507,15 @@ void serializeInfo(JsonObject root)
   JsonObject leds = root.createNestedObject("leds");
   leds[F("count")] = strip.getLengthTotal();
   leds[F("rgbw")] = strip.isRgbw;
-  leds[F("wv")] = strip.isRgbw && (strip.rgbwMode == RGBW_MODE_MANUAL_ONLY || strip.rgbwMode == RGBW_MODE_DUAL); //should a white channel slider be displayed?
+  leds[F("wv")] = false;
+  leds["cct"] = correctWB || strip.hasCCTBus();
+	switch (Bus::getAutoWhiteMode()) {
+		case RGBW_MODE_MANUAL_ONLY:
+		case RGBW_MODE_DUAL:
+			if (strip.isRgbw) leds[F("wv")] = true;
+			break;
+	}
+
   leds[F("pwr")] = strip.currentMilliamps;
   leds[F("fps")] = strip.getFps();
   leds[F("maxpwr")] = (strip.currentMilliamps)? strip.ablMilliampsMax : 0;

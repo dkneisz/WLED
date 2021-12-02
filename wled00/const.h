@@ -124,7 +124,7 @@
 //                                              - 0b010 (dec. 32-47) analog (PWM)
 //                                              - 0b011 (dec. 48-63) digital (data + clock / SPI)
 //                                              - 0b100 (dec. 64-79) unused/reserved
-//                                              - 0b101 (dec. 80-95) digital (data + clock / SPI)
+//                                              - 0b101 (dec. 80-95) virtual network busses
 //                                              - 0b110 (dec. 96-111) unused/reserved
 //                                              - 0b111 (dec. 112-127) unused/reserved
 //bit 7 is reserved and set to 0
@@ -313,15 +313,15 @@
 #ifdef ESP8266
   #define LEDPIN 2    // GPIO2 (D4) on Wemod D1 mini compatible boards
 #else
-  #define LEDPIN 16   // aligns with GPIO2 (D4) on Wemos D1 mini32 compatible boards
+  #define LEDPIN 2   // Changed from 16 to restore compatibility with ESP32-pico
 #endif
 #endif
 
 #ifdef WLED_ENABLE_DMX
 #if (LEDPIN == 2)
   #undef LEDPIN
-  #define LEDPIN 3
-  #warning "Pin conflict compiling with DMX and LEDs on pin 2. The default LED pin has been changed to pin 3."
+  #define LEDPIN 1
+  #warning "Pin conflict compiling with DMX and LEDs on pin 2. The default LED pin has been changed to pin 1."
 #endif
 #endif
 
