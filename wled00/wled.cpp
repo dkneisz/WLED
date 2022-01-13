@@ -193,6 +193,7 @@ void WLED::loop()
   if (lastMqttReconnectAttempt > millis()) {
     rolloverMillis++;
     lastMqttReconnectAttempt = 0;
+    strip.restartRuntime();
   }
   if (millis() - lastMqttReconnectAttempt > 30000) {
     lastMqttReconnectAttempt = millis();
@@ -221,10 +222,15 @@ void WLED::loop()
       delete busConfigs[i]; busConfigs[i] = nullptr;
     }
     strip.finalizeInit();
+    loadLedmap = 0;
     if (aligned) strip.makeAutoSegments();
     else strip.fixInvalidSegments();
     yield();
     serializeConfig();
+  }
+  if (loadLedmap >= 0) {
+    strip.deserializeMap(loadLedmap);
+    loadLedmap = -1;
   }
 
   yield();
@@ -351,7 +357,9 @@ void WLED::setup()
   #endif
 
   #ifdef WLED_ENABLE_ADALIGHT
-  if (!pinManager.isPinAllocated(3)) {
+	//Serial RX (Adalight, Improv, Serial JSON) only possible if GPIO3 unused
+	//Serial TX (Debug, Improv, Serial JSON) only possible if GPIO1 unused
+  if (!pinManager.isPinAllocated(3) && !pinManager.isPinAllocated(1)) {
     Serial.println(F("Ada"));
   }
   #endif
@@ -407,6 +415,7 @@ void WLED::beginStrip()
 {
   // Initialize NeoPixel Strip and button
   strip.finalizeInit(); // busses created during deserializeConfig()
+  strip.deserializeMap();
   strip.makeAutoSegments();
   strip.setBrightness(0);
   strip.setShowCallback(handleOverlayDraw);
@@ -680,7 +689,7 @@ void WLED::handleConnection()
   // reconnect WiFi to clear stale allocations if heap gets too low
   if (now - heapTime > 5000) {
     uint32_t heap = ESP.getFreeHeap();
-    if (heap < JSON_BUFFER_SIZE+512 && lastHeap < JSON_BUFFER_SIZE+512) {
+    if (heap < MIN_HEAP_SIZE && lastHeap < MIN_HEAP_SIZE) {
       DEBUG_PRINT(F("Heap too low! "));
       DEBUG_PRINTLN(heap);
       forceReconnect = true;
