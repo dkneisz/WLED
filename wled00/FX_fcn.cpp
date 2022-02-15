@@ -67,8 +67,13 @@
 //do not call this method from system context (network callback)
 void WS2812FX::finalizeInit(void)
 {
-  RESET_RUNTIME;
-  isRgbw = isOffRefreshRequred = false;
+  //reset segment runtimes
+  for (uint8_t i = 0; i < MAX_NUM_SEGMENTS; i++) {
+    _segment_runtimes[i].markForReset();
+    _segment_runtimes[i].resetIfRequired();
+  }
+
+  _hasWhiteChannel = _isOffRefreshRequired = false;
 
   //if busses failed to load, add default (fresh install, FS issue, ...)
   if (busses.getNumBusses() == 0) {
@@ -93,9 +98,9 @@ void WS2812FX::finalizeInit(void)
     if (bus == nullptr) continue;
     if (bus->getStart() + bus->getLength() > MAX_LEDS) break;
     //RGBW mode is enabled if at least one of the strips is RGBW
-    isRgbw |= bus->isRgbw();
+    _hasWhiteChannel |= bus->isRgbw();
     //refresh is required to remain off if at least one of the strips requires the refresh.
-    isOffRefreshRequred |= bus->isOffRefreshRequired();
+    _isOffRefreshRequired |= bus->isOffRefreshRequired();
     uint16_t busEnd = bus->getStart() + bus->getLength();
     if (busEnd > _length) _length = busEnd;
     #ifdef ESP8266
@@ -373,7 +378,7 @@ void WS2812FX::setMode(uint8_t segid, uint8_t m) {
 
   if (_segments[segid].mode != m) 
   {
-    _segment_runtimes[segid].reset();
+    _segment_runtimes[segid].markForReset();
     _segments[segid].mode = m;
   }
 }
@@ -612,12 +617,12 @@ void WS2812FX::setSegment(uint8_t n, uint16_t i1, uint16_t i2, uint8_t grouping,
     seg.spacing = spacing;
   }
 	if (offset < UINT16_MAX) seg.offset = offset;
-  _segment_runtimes[n].reset();
+  _segment_runtimes[n].markForReset();
 }
 
 void WS2812FX::restartRuntime() {
   for (uint8_t i = 0; i < MAX_NUM_SEGMENTS; i++) {
-    _segment_runtimes[i].reset();
+    _segment_runtimes[i].markForReset();
   }
 }
 
@@ -648,9 +653,9 @@ void WS2812FX::resetSegments() {
     _segments[i].cct = 127;
     _segments[i].speed = DEFAULT_SPEED;
     _segments[i].intensity = DEFAULT_INTENSITY;
-    _segment_runtimes[i].reset();
+    _segment_runtimes[i].markForReset();
   }
-  _segment_runtimes[0].reset();
+  _segment_runtimes[0].markForReset();
 }
 
 void WS2812FX::makeAutoSegments() {
@@ -716,36 +721,16 @@ bool WS2812FX::checkSegmentAlignment() {
 }
 
 //After this function is called, setPixelColor() will use that segment (offsets, grouping, ... will apply)
-//Note: If called in an interrupt (e.g. JSON API), it must be reset with "setPixelColor(255)",
+//Note: If called in an interrupt (e.g. JSON API), original segment must be restored,
 //otherwise it can lead to a crash on ESP32 because _segment_index is modified while in use by the main thread
-#ifdef ARDUINO_ARCH_ESP32
-uint8_t _segment_index_prev = 0;
-uint16_t _virtualSegmentLength_prev = 0;
-bool _ps_set = false;
-#endif
-
-void WS2812FX::setPixelSegment(uint8_t n)
+uint8_t WS2812FX::setPixelSegment(uint8_t n)
 {
+  uint8_t prevSegId = _segment_index;
   if (n < MAX_NUM_SEGMENTS) {
-		#ifdef ARDUINO_ARCH_ESP32
-		if (!_ps_set) {
-			_segment_index_prev = _segment_index;
-			_virtualSegmentLength_prev = _virtualSegmentLength;
-			_ps_set = true;
-		}
-		#endif
     _segment_index = n;
     _virtualSegmentLength = SEGMENT.virtualLength();
-  } else {
-		_virtualSegmentLength = 0;
-		#ifdef ARDUINO_ARCH_ESP32
-		if (_ps_set) {
-			_segment_index = _segment_index_prev;
-			_virtualSegmentLength = _virtualSegmentLength_prev;
-			_ps_set = false;
-		}
-		#endif
   }
+  return prevSegId;
 }
 
 void WS2812FX::setRange(uint16_t i, uint16_t i2, uint32_t col)

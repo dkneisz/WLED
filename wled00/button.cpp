@@ -17,7 +17,7 @@ void shortPressAction(uint8_t b)
   if (!macroButton[b]) {
     switch (b) {
       case 0: toggleOnOff(); colorUpdated(CALL_MODE_BUTTON); break;
-      default: ++effectCurrent %= strip.getModeCount(); colorUpdated(CALL_MODE_BUTTON); break;
+      case 1: ++effectCurrent %= strip.getModeCount(); effectChanged = true; colorUpdated(CALL_MODE_BUTTON); break;
     }
   } else {
     applyPreset(macroButton[b], CALL_MODE_BUTTON_PRESET);
@@ -36,7 +36,7 @@ void longPressAction(uint8_t b)
   if (!macroLongPress[b]) {
     switch (b) {
       case 0: _setRandomColor(false,true); break;
-      default: bri += 8; colorUpdated(CALL_MODE_BUTTON); buttonPressedTime[b] = millis(); break; // repeatable action
+      case 1: bri += 8; colorUpdated(CALL_MODE_BUTTON); buttonPressedTime[b] = millis(); break; // repeatable action
     }
   } else {
     applyPreset(macroLongPress[b], CALL_MODE_BUTTON_PRESET);
@@ -55,7 +55,7 @@ void doublePressAction(uint8_t b)
   if (!macroDoublePress[b]) {
     switch (b) {
       //case 0: toggleOnOff(); colorUpdated(CALL_MODE_BUTTON); break; //instant short press on button 0 if no macro set
-      default: ++effectPalette %= strip.getPaletteCount(); colorUpdated(CALL_MODE_BUTTON); break;
+      case 1: ++effectPalette %= strip.getPaletteCount(); effectChanged = true; colorUpdated(CALL_MODE_BUTTON); break;
     }
   } else {
     applyPreset(macroDoublePress[b], CALL_MODE_BUTTON_PRESET);
@@ -72,21 +72,23 @@ void doublePressAction(uint8_t b)
 bool isButtonPressed(uint8_t i)
 {
   if (btnPin[i]<0) return false;
+  uint8_t pin = btnPin[i];
+
   switch (buttonType[i]) {
     case BTN_TYPE_NONE:
     case BTN_TYPE_RESERVED:
       break;
     case BTN_TYPE_PUSH:
     case BTN_TYPE_SWITCH:
-      if (digitalRead(btnPin[i]) == LOW) return true;
+      if (digitalRead(pin) == LOW) return true;
       break;
     case BTN_TYPE_PUSH_ACT_HIGH:
     case BTN_TYPE_PIR_SENSOR:
-      if (digitalRead(btnPin[i]) == HIGH) return true;
+      if (digitalRead(pin) == HIGH) return true;
       break;
     case BTN_TYPE_TOUCH:
-      #ifdef ARDUINO_ARCH_ESP32
-      if (touchRead(btnPin[i]) <= touchThreshold) return true;
+      #if defined(ARDUINO_ARCH_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32C3)
+      if (touchRead(pin) <= touchThreshold) return true;
       #endif
       break;
   }
@@ -302,7 +304,7 @@ void handleIO()
       // turn off built-in LED if strip is turned off
       // this will break digital bus so will need to be reinitialised on On
       PinOwner ledPinOwner = pinManager.getPinOwner(LED_BUILTIN);
-      if (!strip.isOffRefreshRequred && (ledPinOwner == PinOwner::None || ledPinOwner == PinOwner::BusDigital)) {
+      if (!strip.isOffRefreshRequired() && (ledPinOwner == PinOwner::None || ledPinOwner == PinOwner::BusDigital)) {
         pinMode(LED_BUILTIN, OUTPUT);
         digitalWrite(LED_BUILTIN, HIGH);
       }
