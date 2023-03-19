@@ -100,11 +100,6 @@ void WLED::loop()
     yield();
     #endif
 
-    #ifndef WLED_DISABLE_BLYNK
-    handleBlynk();
-    yield();
-    #endif
-
     handlePresets();
     yield();
 
@@ -171,15 +166,14 @@ void WLED::loop()
       }
       delete busConfigs[i]; busConfigs[i] = nullptr;
     }
-    strip.finalizeInit();
-    loadLedmap = 0;
+    strip.finalizeInit(); // also loads default ledmap if present
     if (aligned) strip.makeAutoSegments();
     else strip.fixInvalidSegments();
     yield();
     serializeConfig();
   }
   if (loadLedmap >= 0) {
-    strip.deserializeMap(loadLedmap);
+    if (!strip.deserializeMap(loadLedmap) && strip.isMatrix && loadLedmap == 0) strip.setUpMatrix();
     loadLedmap = -1;
   }
 
@@ -273,6 +267,9 @@ void WLED::setup()
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detection
   #endif
 
+  #ifdef ARDUINO_ARCH_ESP32
+  pinMode(hardwareRX, INPUT_PULLDOWN); delay(1);        // suppress noise in case RX pin is floating (at low noise energy) - see issue #3128
+  #endif
   Serial.begin(115200);
   #if !ARDUINO_USB_CDC_ON_BOOT
   Serial.setTimeout(50);  // this causes troubles on new MCUs that have a "virtual" USB Serial (HWCDC)
@@ -719,9 +716,6 @@ void WLED::initInterfaces()
   if (ntpEnabled)
     ntpConnected = ntpUdp.begin(ntpLocalPort);
 
-#ifndef WLED_DISABLE_BLYNK
-  initBlynk(blynkApiKey, blynkHost, blynkPort);
-#endif
   e131.begin(e131Multicast, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
   ddp.begin(false, DDP_DEFAULT_PORT);
   reconnectHue();

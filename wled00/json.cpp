@@ -211,6 +211,9 @@ void deserializeSegment(JsonObject elem, byte it, byte presetId)
 
   JsonArray iarr = elem[F("i")]; //set individual LEDs
   if (!iarr.isNull()) {
+    uint8_t oldMap1D2D = seg.map1D2D;
+    seg.map1D2D = M12_Pixels; // no mapping
+
     // set brightness immediately and disable transition
     transitionDelayTemp = 0;
     jsonTransitionOnce = true;
@@ -254,6 +257,7 @@ void deserializeSegment(JsonObject elem, byte it, byte presetId)
         set = 0;
       }
     }
+    seg.map1D2D = oldMap1D2D; // restore mapping
     strip.trigger(); // force segment update
   }
   // send UDP/WS if segment options changed (except selection; will also deselect current preset)
@@ -639,8 +643,14 @@ void serializeInfo(JsonObject root)
   root[F("cpalcount")] = strip.customPalettes.size(); //number of custom palettes
 
   JsonArray ledmaps = root.createNestedArray(F("maps"));
-  for (size_t i=0; i<10; i++) {
-    if ((ledMaps>>i) & 0x0001) ledmaps.add(i);
+  for (size_t i=0; i<WLED_MAX_LEDMAPS; i++) {
+    if ((ledMaps>>i) & 0x00000001U) {
+      JsonObject ledmaps0 = ledmaps.createNestedObject();
+      ledmaps0["id"] = i;
+      #ifndef ESP8266
+      if (i && ledmapNames[i-1]) ledmaps0["n"] = ledmapNames[i-1];
+      #endif
+    }
   }
 
   JsonObject wifi_info = root.createNestedObject("wifi");
@@ -703,9 +713,9 @@ void serializeInfo(JsonObject root)
   #ifndef WLED_DISABLE_ALEXA
   os += 0x40;
   #endif
-  #ifndef WLED_DISABLE_BLYNK
-  os += 0x20;
-  #endif
+
+  //os += 0x20; // indicated now removed Blynk support, may be reused to indicate another build-time option
+
   #ifdef USERMOD_CRONIXIE
   os += 0x10;
   #endif
