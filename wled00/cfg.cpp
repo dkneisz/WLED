@@ -197,6 +197,9 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   disablePullUp = !pull;
   JsonArray hw_btn_ins = btn_obj[F("ins")];
   if (!hw_btn_ins.isNull()) {
+    for (uint8_t b = 0; b < WLED_MAX_BUTTONS; b++) { // deallocate existing button pins
+      pinManager.deallocatePin(btnPin[b], PinOwner::Button); // does nothing if trying to deallocate a pin with PinOwner != Button
+    }
     uint8_t s = 0;
     for (JsonObject btn : hw_btn_ins) {
       CJSON(buttonType[s], btn["type"]);
@@ -264,6 +267,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
 
   int hw_ir_pin = hw["ir"]["pin"] | -2; // 4
   if (hw_ir_pin > -2) {
+    pinManager.deallocatePin(irPin, PinOwner::IR);
     if (pinManager.allocatePin(hw_ir_pin, false, PinOwner::IR)) {
       irPin = hw_ir_pin;
     } else {
@@ -276,6 +280,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   JsonObject relay = hw[F("relay")];
   int hw_relay_pin = relay["pin"] | -2;
   if (hw_relay_pin > -2) {
+    pinManager.deallocatePin(rlyPin, PinOwner::Relay);
     if (pinManager.allocatePin(hw_relay_pin,true, PinOwner::Relay)) {
       rlyPin = hw_relay_pin;
       pinMode(rlyPin, OUTPUT);
@@ -297,9 +302,11 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   PinManagerPinType i2c[2] = { { i2c_sda, true }, { i2c_scl, true } };
   if (i2c_scl >= 0 && i2c_sda >= 0 && pinManager.allocateMultiplePins(i2c, 2, PinOwner::HW_I2C)) {
     #ifdef ESP32
-    Wire.setPins(i2c_sda, i2c_scl); // this will fail if Wire is initilised (Wire.begin() called prior)
+    if (!Wire.setPins(i2c_sda, i2c_scl)) { i2c_scl = i2c_sda = -1; } // this will fail if Wire is initilised (Wire.begin() called prior)
+    else Wire.begin();
+    #else
+    Wire.begin(i2c_sda, i2c_scl);
     #endif
-    Wire.begin();
   } else {
     i2c_sda = -1;
     i2c_scl = -1;
@@ -336,7 +343,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   if (light_gc_col > 1.0f) gammaCorrectCol = true;
   else                     gammaCorrectCol = false;
   if (gammaCorrectVal > 1.0f && gammaCorrectVal <= 3) {
-    if (gammaCorrectVal != 2.8f) calcGammaTable(gammaCorrectVal);
+    if (gammaCorrectVal != 2.8f) NeoGammaWLEDMethod::calcGammaTable(gammaCorrectVal);
   } else {
     gammaCorrectVal = 1.0f; // no gamma correction
     gammaCorrectBri = false;
@@ -440,6 +447,13 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   getStringFromJson(mqttGroupTopic, if_mqtt[F("topics")][F("group")], 33); // ""
   CJSON(retainMqttMsg, if_mqtt[F("rtn")]);
 #endif
+
+#ifndef WLED_DISABLE_ESPNOW
+  JsonObject remote = doc["remote"];
+  CJSON(enable_espnow_remote, remote[F("remote_enabled")]);
+  getStringFromJson(linked_remote, remote[F("linked_remote")], 13);
+#endif
+
 
 #ifndef WLED_DISABLE_HUESYNC
   JsonObject if_hue = interfaces["hue"];
@@ -892,6 +906,13 @@ void serializeConfig() {
   if_mqtt_topics[F("device")] = mqttDeviceTopic;
   if_mqtt_topics[F("group")] = mqttGroupTopic;
 #endif
+
+#ifndef WLED_DISABLE_ESPNOW
+  JsonObject remote = doc.createNestedObject(F("remote"));
+  remote[F("remote_enabled")] = enable_espnow_remote;
+  remote[F("linked_remote")] = linked_remote;
+#endif
+
 
 #ifndef WLED_DISABLE_HUESYNC
   JsonObject if_hue = interfaces.createNestedObject("hue");
